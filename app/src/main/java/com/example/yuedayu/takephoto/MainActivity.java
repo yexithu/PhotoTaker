@@ -76,6 +76,56 @@ public class MainActivity extends Activity {
         }
     };
 
+    private static File getOutputMediaFile() {
+        // To be safe, you should check that the SDCard is mounted
+        // using Environment.getExternalStorageState() before doing this.
+
+        File mediaStorageDir = new File(Environment.getExternalStoragePublicDirectory(
+                Environment.DIRECTORY_PICTURES), "MyCameraApp");
+        // This location works best if you want the created images to be shared
+        // between applications and persist after your app has been uninstalled.
+
+        // Create the storage directory if it does not exist
+        if (!mediaStorageDir.exists()) {
+            if (!mediaStorageDir.mkdirs()) {
+                Log.d("MyCameraApp", "failed to create directory");
+                return null;
+            }
+        }
+
+        // Create a media file name
+        String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new java.util.Date());
+        File mediaFile;
+        mediaFile = new File(getSDPath() + File.separator + "pic" + File.separator +
+                "IMG_" + timeStamp + ".jpg");
+
+        return mediaFile;
+    }
+
+    private Camera.PictureCallback mPicture = new Camera.PictureCallback() {
+
+        @Override
+        public void onPictureTaken(byte[] data, Camera camera) {
+
+            File pictureFile = getOutputMediaFile();
+            if (pictureFile == null) {
+                return;
+            }
+
+            try {
+                FileOutputStream fos = new FileOutputStream(pictureFile);
+                Log.i(TAG, "out!");
+                fos.write(data);
+                fos.close();
+            } catch (FileNotFoundException e) {
+                Log.d(TAG, "File not found: " + e.getMessage());
+            } catch (IOException e) {
+                Log.d(TAG, "Error accessing file: " + e.getMessage());
+            }
+            mCamera.startPreview();
+        }
+    };
+
     @SuppressLint("SimpleDateFormat")
     private void setVideo(boolean flag) {
         if (isStarted && flag) {
@@ -130,13 +180,16 @@ public class MainActivity extends Activity {
         @Override
         public void handleMessage(Message msg) { // 处理消息
 //            text .setText(msg. obj .toString());
+            Log.i(TAG, msg.obj.toString());
             if (msg.obj.toString().equals("start")) {
-                setVideo(true);
+                setLight(false);
+                mCamera.takePicture(null, null, mPicture);
+
+//                setVideo(true);
             } else if (msg.obj.toString().equals("open")) {
                 setLight(true);
-            } else {
-                setVideo(false);
-                setLight(false);
+                mCamera.takePicture(null, null, mPicture);
+//                setLight(true);
             }
         }
     }
@@ -156,7 +209,7 @@ public class MainActivity extends Activity {
             Message m = mHandler.obtainMessage(1, 1, 1, msg);
             mHandler.sendMessage(m);
             try {
-                wait(100);
+                sleep(1000);
             } catch (Exception e) {
 
             }
@@ -164,15 +217,15 @@ public class MainActivity extends Activity {
             mHandler.removeMessages(0);
             m = mHandler.obtainMessage(1, 1, 1, msg);
             mHandler.sendMessage(m);
-            try {
-                wait(100);
-            } catch (Exception e) {
-
-            }
-            msg = "close";
-            mHandler.removeMessages(0);
-            m = mHandler.obtainMessage(1, 1, 1, msg);
-            mHandler.sendMessage(m);
+//            try {
+//                sleep(1000);
+//            } catch (Exception e) {
+//
+//            }
+//            msg = "close";
+//            mHandler.removeMessages(0);
+//            m = mHandler.obtainMessage(1, 1, 1, msg);
+//            mHandler.sendMessage(m);
         }
     }
 
