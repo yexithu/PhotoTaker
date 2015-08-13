@@ -20,6 +20,9 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.Message;
 import android.util.Log;
 import android.view.View;
 import android.view.View.OnClickListener;
@@ -40,9 +43,8 @@ public class MainActivity extends Activity {
     private MediaRecorder mMediaRecorder;
     private boolean isStarted = false;
     private FrameLayout preview;
-    public float angle[] = new float[3]; //x y z angle information
-    private static final float NS2S = 1.0f / 1000000000.0f;
-    private float timestamp;
+    MyHandler mHandler = null;
+    Thread thread;
 
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -61,16 +63,118 @@ public class MainActivity extends Activity {
         startBtn.setOnClickListener(onclick);
     }
 
-    OnClickListener onclick = new OnClickListener() {
-        //        @SuppressLint("SimpleDateFormat")
+    OnClickListener onclick = new OnClickListener(){
         @Override
         public void onClick(View arg0) {
-            setLight(false);
-            mCamera.takePicture(null, null, mPicture);
-            setLight(true);
-            mCamera.takePicture(null, null, mPicture);
+//            if (isStarted) {
+//                setVideo(true);
+//            } else {
+//                setVideo(false);
+//            }
+            thread = new MyThread();
+            thread.start();
         }
     };
+
+    @SuppressLint("SimpleDateFormat")
+    private void setVideo(boolean flag) {
+        if (isStarted && flag) {
+            Log.i(TAG, "start");
+            isStarted = false;
+            startBtn.setText("Start");
+            mMediaRecorder.stop();
+            mMediaRecorder.reset();
+            mMediaRecorder.release();
+            mMediaRecorder = null;
+            if(mCamera != null)
+                mCamera.lock();
+        } else {
+            Log.i(TAG, "stop");
+            isStarted = true;
+            startBtn.setText("Stop");
+            mCamera.unlock();
+            mMediaRecorder = new MediaRecorder();
+            CamcorderProfile mProfile = CamcorderProfile.get(CamcorderProfile.QUALITY_HIGH);
+            mMediaRecorder.reset();
+            mMediaRecorder.setCamera(mCamera);
+            mMediaRecorder.setAudioSource(MediaRecorder.AudioSource.CAMCORDER);
+            mMediaRecorder.setVideoSource(MediaRecorder.VideoSource.CAMERA);
+            mMediaRecorder.setProfile(mProfile);
+            long dateTaken = System.currentTimeMillis();
+            Date date = new Date(dateTaken);
+            SimpleDateFormat dateFormat = new SimpleDateFormat("HH-mm-ss");
+            String title = dateFormat.format(date);
+            String filename = title + ".3gp"; // Used when emailing.
+            String cameraDirPath = getSDPath() + File.separator + "pic" + File.separator;
+            System.out.println(cameraDirPath);
+            String filePath = cameraDirPath + filename;
+            File cameraDir = new File(cameraDirPath);
+            cameraDir.mkdirs();
+            mMediaRecorder.setOutputFile(filePath);
+            try {
+                mMediaRecorder.prepare();
+                mMediaRecorder.start(); // Recording is now started
+            } catch (RuntimeException e) {
+                Log.e(TAG, "Could not start media recorder. ", e);
+                return;
+            } catch (IOException e) {
+                Log.e(TAG, "Could not start media recorder. ", e);
+            }
+        }
+    }
+
+    private class MyHandler extends Handler {
+        public MyHandler(Looper looper){
+            super (looper);
+        }
+        @Override
+        public void handleMessage(Message msg) { // 处理消息
+//            text .setText(msg. obj .toString());
+            if (msg.obj.toString().equals("start")) {
+                setVideo(true);
+            } else if (msg.obj.toString().equals("open")) {
+                setLight(true);
+            } else {
+                setVideo(false);
+                setLight(false);
+            }
+        }
+    }
+
+    private class MyThread extends Thread{
+        @Override
+        public void run() {
+            Looper curLooper = Looper.myLooper ();
+            Looper mainLooper = Looper.getMainLooper ();
+            if (curLooper== null ){
+                mHandler = new MyHandler(mainLooper);
+            } else {
+                mHandler = new MyHandler(curLooper);
+            }
+            String msg = "start";
+            mHandler.removeMessages(0);
+            Message m = mHandler.obtainMessage(1, 1, 1, msg);
+            mHandler.sendMessage(m);
+            try {
+                wait(100);
+            } catch (Exception e) {
+
+            }
+            msg = "open";
+            mHandler.removeMessages(0);
+            m = mHandler.obtainMessage(1, 1, 1, msg);
+            mHandler.sendMessage(m);
+            try {
+                wait(100);
+            } catch (Exception e) {
+
+            }
+            msg = "close";
+            mHandler.removeMessages(0);
+            m = mHandler.obtainMessage(1, 1, 1, msg);
+            mHandler.sendMessage(m);
+        }
+    }
 
     private void setLight(boolean flag) {
         Camera.Parameters mParameters = mCamera.getParameters();
@@ -81,59 +185,6 @@ public class MainActivity extends Activity {
         }
         mCamera.setParameters(mParameters);
     }
-
-    /**
-     * Create a File for saving an image or video
-     */
-    private static File getOutputMediaFile() {
-        // To be safe, you should check that the SDCard is mounted
-        // using Environment.getExternalStorageState() before doing this.
-
-        File mediaStorageDir = new File(Environment.getExternalStoragePublicDirectory(
-                Environment.DIRECTORY_PICTURES), "MyCameraApp");
-        // This location works best if you want the created images to be shared
-        // between applications and persist after your app has been uninstalled.
-
-        // Create the storage directory if it does not exist
-        if (!mediaStorageDir.exists()) {
-            if (!mediaStorageDir.mkdirs()) {
-                Log.d("MyCameraApp", "failed to create directory");
-                return null;
-            }
-        }
-
-        // Create a media file name
-        String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new java.util.Date());
-        File mediaFile;
-        mediaFile = new File(getSDPath() + File.separator + "pic" + File.separator +
-                "IMG_" + timeStamp + ".jpg");
-
-        return mediaFile;
-    }
-
-    private Camera.PictureCallback mPicture = new Camera.PictureCallback() {
-
-        @Override
-        public void onPictureTaken(byte[] data, Camera camera) {
-
-            File pictureFile = getOutputMediaFile();
-            if (pictureFile == null) {
-                return;
-            }
-
-            try {
-                FileOutputStream fos = new FileOutputStream(pictureFile);
-                Log.i(TAG, "out!");
-                fos.write(data);
-                fos.close();
-            } catch (FileNotFoundException e) {
-                Log.d(TAG, "File not found: " + e.getMessage());
-            } catch (IOException e) {
-                Log.d(TAG, "Error accessing file: " + e.getMessage());
-            }
-            mCamera.startPreview();
-        }
-    };
 
     public static String getSDPath() {
         File sdDir = null;
