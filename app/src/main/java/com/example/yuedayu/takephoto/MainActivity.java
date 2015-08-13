@@ -19,6 +19,9 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.Message;
 import android.util.Log;
 import android.view.View;
 import android.view.View.OnClickListener;
@@ -39,9 +42,6 @@ public class MainActivity extends Activity {
     private Button flashBtn;
     private MediaRecorder mMediaRecorder;
     private FrameLayout preview;
-    public float angle[] = new float[3]; //x y z angle information
-    private static final float NS2S = 1.0f / 1000000000.0f;
-    private float timestamp;
     private boolean isRecording = false;
 
     public static final int MEDIA_TYPE_IMAGE = 1;
@@ -67,102 +67,18 @@ public class MainActivity extends Activity {
         startBtn = (Button) findViewById(R.id.btnStartStop);
         startBtn.setOnClickListener(onclick);
 
-        flashBtn = (Button) findViewById(R.id.flashButton);
-        flashBtn.setOnClickListener(flashClick);
     }
-
-    OnClickListener flashClick = new OnClickListener() {
-        @Override
-        public void onClick(View view) {
-            if(!isRecording) {
-                mCamera.lock();
-            }
-
-            Camera.Parameters parameters = mCamera.getParameters();
-            parameters.setFlashMode(parameters.getFlashMode().equals(Camera.Parameters.FLASH_MODE_TORCH) ? Camera.Parameters.FLASH_MODE_OFF : Camera.Parameters.FLASH_MODE_TORCH);
-            mCamera.setParameters(parameters);
-
-            if(!isRecording) {
-                mCamera.unlock();
-            }
-        }
-    };
 
     OnClickListener onclick = new OnClickListener() {
         @Override
         public void onClick(View v) {
-            if (isRecording) {
-                // stop recording and release camera
-                mMediaRecorder.stop();  // stop the recording
-                releaseMediaRecorder(); // release the MediaRecorder object
+            recordingStart();
 
-                // inform the user that recording has stopped
-                startBtn.setText("Capture");
-                isRecording = false;
-            } else {
-                // initialize video camera
-                if (prepareVideoRecorder()) {
-                    // Camera is available and unlocked, MediaRecorder is prepared,
-                    // now you can start recording
-                    mMediaRecorder.start();
-
-                    // inform the user that recording has started
-                    startBtn.setText("Stop");
-                    isRecording = true;
-                } else {
-                    // prepare didn't work, release the camera
-                    releaseMediaRecorder();
-                    // inform user
-                }
-            }
+            TimeSlotHandler timeSlotHandler = new TimeSlotHandler();
+            TimeSlotThread timeSlotThread = new TimeSlotThread(timeSlotHandler, 100);
+            timeSlotThread.start();
         }
     };
-
-    private void setLight(boolean flag) {
-        Camera.Parameters mParameters = mCamera.getParameters();
-        if (flag) {
-            mParameters.setFlashMode(Camera.Parameters.FLASH_MODE_ON);
-        } else {
-            mParameters.setFlashMode(Camera.Parameters.FLASH_MODE_OFF);
-        }
-        mCamera.setParameters(mParameters);
-    }
-
-    private Camera.PictureCallback mPicture = new Camera.PictureCallback() {
-
-        @Override
-        public void onPictureTaken(byte[] data, Camera camera) {
-
-            File pictureFile = getOutputMediaFile(MEDIA_TYPE_IMAGE);
-            if (pictureFile == null) {
-                return;
-            }
-
-            try {
-                FileOutputStream fos = new FileOutputStream(pictureFile);
-                Log.i(TAG, "out!");
-                fos.write(data);
-                fos.close();
-            } catch (FileNotFoundException e) {
-                Log.d(TAG, "File not found: " + e.getMessage());
-            } catch (IOException e) {
-                Log.d(TAG, "Error accessing file: " + e.getMessage());
-            }
-            mCamera.startPreview();
-        }
-    };
-
-    public static String getSDPath() {
-        File sdDir = null;
-        boolean sdCardExist = Environment.getExternalStorageState()
-                .equals(android.os.Environment.MEDIA_MOUNTED);
-        if (sdCardExist) {
-            sdDir = Environment.getExternalStorageDirectory();
-            return sdDir.toString();
-        }
-
-        return null;
-    }
 
     private boolean checkCameraHardware(Context context) {
         if (context.getPackageManager().hasSystemFeature(PackageManager.FEATURE_CAMERA)) {
@@ -295,5 +211,102 @@ public class MainActivity extends Activity {
             mCamera.release();        // release the camera for other applications
             mCamera = null;
         }
+    }
+
+    private void setFlash() {
+        if(!isRecording) {
+            mCamera.lock();
+        }
+
+        Camera.Parameters parameters = mCamera.getParameters();
+        parameters.setFlashMode(parameters.getFlashMode().equals(Camera.Parameters.FLASH_MODE_TORCH) ? Camera.Parameters.FLASH_MODE_OFF : Camera.Parameters.FLASH_MODE_TORCH);
+        mCamera.setParameters(parameters);
+
+        if(!isRecording) {
+            mCamera.unlock();
+        }
+    }
+
+    private class TimeSlotHandler extends Handler {
+        public TimeSlotHandler() {
+            super();
+        }
+
+        public TimeSlotHandler(Looper looper) {
+            super(looper);
+        }
+
+        @Override
+        public void handleMessage(Message msg) {
+            super.handleMessage(msg);
+            switch (msg.what) {
+                case 0:
+                    setFlash();
+
+                     break;
+                case 1:
+                    setFlash();
+                    recordingEnd();
+                    break;
+            }
+
+        }
+    }
+
+    private class TimeSlotThread extends Thread {
+
+
+        private TimeSlotHandler mTimeSlotHandler;
+        int mWaitTime = 250;
+        int beforetime = 1;
+        int afterTime = 500;
+        public TimeSlotThread(TimeSlotHandler handler, int waitTime) {
+            this.mWaitTime = waitTime;
+            mTimeSlotHandler = handler;
+        }
+        @Override
+        public void run() {
+            try {
+                sleep(beforetime);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+            Message flashMessage = mTimeSlotHandler.obtainMessage(0);
+            flashMessage.sendToTarget();
+            try {
+                sleep(afterTime);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+            Message message = mTimeSlotHandler.obtainMessage(1);
+            message.sendToTarget();
+        }
+    }
+
+    public void recordingStart() {
+        // initialize video camera
+        if (prepareVideoRecorder()) {
+            // Camera is available and unlocked, MediaRecorder is prepared,
+            // now you can start recording
+            mMediaRecorder.start();
+
+            // inform the user that recording has started
+            startBtn.setText("Stop");
+            isRecording = true;
+        } else {
+            // prepare didn't work, release the camera
+            releaseMediaRecorder();
+            // inform user
+        }
+    }
+
+    public void recordingEnd() {
+        // stop recording and release camera
+        mMediaRecorder.stop();  // stop the recording
+        releaseMediaRecorder(); // release the MediaRecorder object
+
+        // inform the user that recording has stopped
+        startBtn.setText("Capture");
+        isRecording = false;
     }
 }
