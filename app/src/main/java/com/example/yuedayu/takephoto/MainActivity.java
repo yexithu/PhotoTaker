@@ -4,7 +4,6 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.sql.Date;
 import java.text.SimpleDateFormat;
 import java.util.List;
 
@@ -37,12 +36,16 @@ public class MainActivity extends Activity {
     private Camera mCamera;
     private CameraPreview mPreview;
     private Button startBtn;
+    private Button flashBtn;
     private MediaRecorder mMediaRecorder;
-    private boolean isStarted = false;
     private FrameLayout preview;
     public float angle[] = new float[3]; //x y z angle information
     private static final float NS2S = 1.0f / 1000000000.0f;
     private float timestamp;
+    private boolean isRecording = false;
+
+    public static final int MEDIA_TYPE_IMAGE = 1;
+    public static final int MEDIA_TYPE_VIDEO = 2;
 
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -52,23 +55,66 @@ public class MainActivity extends Activity {
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setContentView(R.layout.activity_main);
+
         mCamera = getCameraInstance();
+        mMediaRecorder = new MediaRecorder();
+
         mPreview = new CameraPreview(this, mCamera);
         preview = (FrameLayout) findViewById(R.id.camera_preview);
         setSize();
         preview.addView(mPreview);
+
         startBtn = (Button) findViewById(R.id.btnStartStop);
         startBtn.setOnClickListener(onclick);
+
+        flashBtn = (Button) findViewById(R.id.flashButton);
+        flashBtn.setOnClickListener(flashClick);
     }
 
-    OnClickListener onclick = new OnClickListener() {
-        //        @SuppressLint("SimpleDateFormat")
+    OnClickListener flashClick = new OnClickListener() {
         @Override
-        public void onClick(View arg0) {
-            setLight(false);
-            mCamera.takePicture(null, null, mPicture);
-            setLight(true);
-            mCamera.takePicture(null, null, mPicture);
+        public void onClick(View view) {
+            if(!isRecording) {
+                mCamera.lock();
+            }
+
+            Camera.Parameters parameters = mCamera.getParameters();
+            parameters.setFlashMode(parameters.getFlashMode().equals(Camera.Parameters.FLASH_MODE_TORCH) ? Camera.Parameters.FLASH_MODE_OFF : Camera.Parameters.FLASH_MODE_TORCH);
+            mCamera.setParameters(parameters);
+
+            if(!isRecording) {
+                mCamera.unlock();
+            }
+        }
+    };
+
+    OnClickListener onclick = new OnClickListener() {
+        @Override
+        public void onClick(View v) {
+            if (isRecording) {
+                // stop recording and release camera
+                mMediaRecorder.stop();  // stop the recording
+                releaseMediaRecorder(); // release the MediaRecorder object
+
+                // inform the user that recording has stopped
+                startBtn.setText("Capture");
+                isRecording = false;
+            } else {
+                // initialize video camera
+                if (prepareVideoRecorder()) {
+                    // Camera is available and unlocked, MediaRecorder is prepared,
+                    // now you can start recording
+                    mMediaRecorder.start();
+
+                    // inform the user that recording has started
+                    startBtn.setText("Stop");
+                    isRecording = true;
+                } else {
+                    // prepare didn't work, release the camera
+                    releaseMediaRecorder();
+                    // inform user
+                }
+            }
         }
     };
 
@@ -82,41 +128,12 @@ public class MainActivity extends Activity {
         mCamera.setParameters(mParameters);
     }
 
-    /**
-     * Create a File for saving an image or video
-     */
-    private static File getOutputMediaFile() {
-        // To be safe, you should check that the SDCard is mounted
-        // using Environment.getExternalStorageState() before doing this.
-
-        File mediaStorageDir = new File(Environment.getExternalStoragePublicDirectory(
-                Environment.DIRECTORY_PICTURES), "MyCameraApp");
-        // This location works best if you want the created images to be shared
-        // between applications and persist after your app has been uninstalled.
-
-        // Create the storage directory if it does not exist
-        if (!mediaStorageDir.exists()) {
-            if (!mediaStorageDir.mkdirs()) {
-                Log.d("MyCameraApp", "failed to create directory");
-                return null;
-            }
-        }
-
-        // Create a media file name
-        String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new java.util.Date());
-        File mediaFile;
-        mediaFile = new File(getSDPath() + File.separator + "pic" + File.separator +
-                "IMG_" + timeStamp + ".jpg");
-
-        return mediaFile;
-    }
-
     private Camera.PictureCallback mPicture = new Camera.PictureCallback() {
 
         @Override
         public void onPictureTaken(byte[] data, Camera camera) {
 
-            File pictureFile = getOutputMediaFile();
+            File pictureFile = getOutputMediaFile(MEDIA_TYPE_IMAGE);
             if (pictureFile == null) {
                 return;
             }
@@ -173,18 +190,110 @@ public class MainActivity extends Activity {
         mCamera.setParameters(mParameters);
     }
 
-    public static Camera getCameraInstance() {
-        Camera c = null;
+    @Override
+    protected void onPause() {
+        super.onPause();
+        releaseMediaRecorder();       // if you are using MediaRecorder, release it first
+        releaseCamera();              // release the camera immediately on pause event
+    }
+
+    public Camera getCameraInstance() {
+        Camera c = mCamera;
+
         try {
             c = Camera.open();
         } catch (Exception e) {
-
+            Log.w("Get CameraInstance", "Open Fail");
         }
         return c;
     }
 
     public void onDestroy() {
-        mCamera.release();
+        //mCamera.release();
         super.onDestroy();
+    }
+
+    private boolean prepareVideoRecorder(){
+
+        mCamera.unlock();
+
+        // Step 1: Unlock and set camera to MediaRecorder
+        mMediaRecorder.setCamera(mCamera);
+
+        // Step 2: Set sources
+        mMediaRecorder.setAudioSource(MediaRecorder.AudioSource.CAMCORDER);
+        mMediaRecorder.setVideoSource(MediaRecorder.VideoSource.CAMERA);
+
+        // Step 3: Set a CamcorderProfile (requires API Level 8 or higher)
+        mMediaRecorder.setProfile(CamcorderProfile.get(CamcorderProfile.QUALITY_HIGH));
+
+        // Step 4: Set output file
+        mMediaRecorder.setOutputFile(getOutputMediaFile(MEDIA_TYPE_VIDEO).toString());
+
+        // Step 5: Set the preview output
+        mMediaRecorder.setPreviewDisplay(mPreview.getHolder().getSurface());
+
+        // Step 6: Prepare configured MediaRecorder
+        try {
+            mMediaRecorder.prepare();
+        } catch (IllegalStateException e) {
+            Log.d(TAG, "IllegalStateException preparing MediaRecorder: " + e.getMessage());
+            releaseMediaRecorder();
+            return false;
+        } catch (IOException e) {
+            Log.d(TAG, "IOException preparing MediaRecorder: " + e.getMessage());
+            releaseMediaRecorder();
+            return false;
+        }
+        return true;
+    }
+
+    private static File getOutputMediaFile(int type){
+        // To be safe, you should check that the SDCard is mounted
+        // using Environment.getExternalStorageState() before doing this.
+
+        File mediaStorageDir = new File(Environment.getExternalStoragePublicDirectory(
+                Environment.DIRECTORY_PICTURES), "MyCameraApp");
+        // This location works best if you want the created images to be shared
+        // between applications and persist after your app has been uninstalled.
+
+        // Create the storage directory if it does not exist
+        if (! mediaStorageDir.exists()){
+            if (! mediaStorageDir.mkdirs()){
+                Log.d("MyCameraApp", "failed to create directory");
+                return null;
+            }
+        }
+
+        // Create a media file name
+        String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new java.util.Date());
+        File mediaFile;
+        if (type == MEDIA_TYPE_IMAGE){
+            mediaFile = new File(mediaStorageDir.getPath() + File.separator +
+                    "IMG_"+ timeStamp + ".jpg");
+        } else if(type == MEDIA_TYPE_VIDEO) {
+            mediaFile = new File(mediaStorageDir.getPath() + File.separator +
+                    "VID_"+ timeStamp + ".mp4");
+        } else {
+            return null;
+        }
+
+        return mediaFile;
+    }
+
+    private void releaseMediaRecorder(){
+        if (mMediaRecorder != null) {
+            mMediaRecorder.reset();   // clear recorder configuration
+            mMediaRecorder.release(); // release the recorder object
+            mMediaRecorder = null;
+            //mCamera.lock();           // lock camera for later use
+        }
+    }
+
+    private void releaseCamera(){
+        if (mCamera != null){
+            mCamera.release();        // release the camera for other applications
+            mCamera = null;
+        }
     }
 }
